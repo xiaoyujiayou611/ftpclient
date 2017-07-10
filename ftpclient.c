@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <netinet/in.h>
 #include <sys/types.h>
+#include <arpa/inet.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -12,6 +13,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <time.h>
+
+#include "ftpclient.h"
 
 #define SERV_PORT   21
 #define BUFFERSIZE  1024
@@ -25,25 +28,6 @@ int f;
 #define FTP_USER        "ftpuser"
 #define FTP_PASS        "admin"
 
-int login();
-
-void ftp_list(int control_sockfd);
-
-void ftp_pwd(int control_sockfd);
-
-void ftp_changdir(char dir[], int control_sockfd);
-
-void ftp_quit(int control_sockfd);
-
-void ftp_creat_mkd(char *path, int control_sockfd);
-
-int ftp_up(int control_sockfd);
-
-void ftp_stru(int control_sockfd);
-
-void ftp_rest(int control_sockfd);
-
-char *itoa(int value, char *string, int radix);
 
 int main(int argc, char **argv) {
     char command[BUFFERSIZE];
@@ -121,7 +105,7 @@ int login() {
 
     //获取hostent中相关参数
     char name[BUFFERSIZE], password[BUFFERSIZE];
-    printf("Login Server: ", name);
+    printf("Login Server: ");
     scanf("%s", name);
     if (inet_pton(AF_INET, name, &serv_addr.sin_addr) == 0) {
         printf("Server IP is a error!\n");
