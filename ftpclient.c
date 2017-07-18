@@ -19,23 +19,28 @@
 #define SERV_PORT   21
 #define BUFFERSIZE  1024
 int login_yes = 0;
-static int control_sockfd;
 int npsupport;
 int f;
 
-#define LOGIN_SUCCESS   1
-#define LOGIN_FAILED    2
+#define LOGIN_FAILED    -1
 #define FTP_USER        "ftpuser"
 #define FTP_PASS        "admin"
 
 
-int main(int argc, char **argv) {
+void error(char *p) {
+    printf("Error: %s\n", p);
+}
+
+
+int cli(int argc, char **argv) {
     char command[BUFFERSIZE];
     char *cmd;
+    ftpFd control_sockfd;
 
     int try_count = 0;
     while (try_count < 3) {
-        if (login() == LOGIN_SUCCESS) {
+        control_sockfd = login("127", 123, "", "");
+        if ( control_sockfd != LOGIN_FAILED) {
             printf("Login Success!\n");
             break;
         }
@@ -94,10 +99,23 @@ int main(int argc, char **argv) {
 
 }
 
-int login() {
+int speed_test(int bytes) {
+    return 0;
+}
+
+int speed_test_by_file(char * filename) {
+    return 0;
+}
+
+void logout(ftpFd fd) {
+    close(fd);
+}
+
+ftpFd login(char * server, int port, char * user, char * pwd) {
     //初始化端口信息
     char senddate, recvdate;
     char sendline[BUFFERSIZE], recvline[BUFFERSIZE];
+    int control_sockfd;
     struct sockaddr_in serv_addr;
     bzero(&serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
@@ -105,9 +123,8 @@ int login() {
 
     //获取hostent中相关参数
     char name[BUFFERSIZE], password[BUFFERSIZE];
-    printf("Login Server: ");
-    scanf("%s", name);
-    if (inet_pton(AF_INET, name, &serv_addr.sin_addr) == 0) {
+    printf("Connect to server: %s:%d\n", server, port);
+    if (inet_pton(AF_INET, server, &serv_addr.sin_addr) == 0) {
         printf("Server IP is a error!\n");
         return LOGIN_FAILED;
     }
@@ -128,7 +145,7 @@ int login() {
         printf("recvdate is connect error\n");
         return LOGIN_FAILED;
     } else if (strncmp(recvline, "220", 3) == 0) {
-        printf("connect success,pelase enter username\n");
+        printf("%s\n", recvline);
     } else {
         printf("220 connect is error!");
         return LOGIN_FAILED;
@@ -139,38 +156,41 @@ int login() {
     bzero(password, BUFFERSIZE);
     bzero(recvline, BUFFERSIZE);
     bzero(sendline, BUFFERSIZE);
-    printf("ftp-> ");
-    sprintf(sendline, "USER ftpuser\r\n");
-    printf("--->%s\n", sendline);
+
+    //拼接登录命令
+    int n = snprintf(sendline, sizeof(sendline), "USER %s\r\n", user);
+    if (n >= sizeof(sendline)) {
+        printf("Memory error!\n");
+        exit(1);
+    }
+    printf(">>>%s\n", sendline);
     sendbytes = send(control_sockfd, sendline, strlen(sendline), 0);
     if (sendbytes == -1) {
         printf("send is wrong\n");
-        login_yes = 0;
+        return LOGIN_FAILED;
     }
     recvbytes = recv(control_sockfd, recvline, sizeof(recvline), 0);
     if (strncmp(recvline, "331", 3) == 0) {
         printf("331 please specify the password.\n");
     } else {
         printf("recv date is error.\n");
-        login_yes = 0;
+        return LOGIN_FAILED;
     }
     bzero(sendline, BUFFERSIZE);
     bzero(recvline, BUFFERSIZE);
-    printf("ftp-> ");
-    sprintf(sendline, "PASS admin\r\n");
-    printf("--->%s\n", sendline);
+    snprintf(sendline, sizeof(sendline), "PASS %s\r\n", pwd);
+    printf(">>>%s\n", sendline);
     sendbytes = send(control_sockfd, sendline, strlen(sendline), 0);
     if (sendbytes == -1) {
         printf("pass send is error\n");
-        login_yes = 0;
+        return LOGIN_FAILED;
     }
     recvbytes = recv(control_sockfd, recvline, sizeof(recvline), 0);
     if (strncmp(recvline, "230", 3) == 0) {
         printf("login success!\n");
-        login_yes = 1;
     } else {
         printf("pass recv is error\n");
-        login_yes = 0;
+        return LOGIN_FAILED;
     }    //支持断点续传
     bzero(sendline, BUFFERSIZE);
     bzero(recvline, BUFFERSIZE);
@@ -178,23 +198,23 @@ int login() {
     sendbytes = send(control_sockfd, sendline, strlen(sendline), 0);
     if (sendbytes == -1) {
         printf("rest send is error!\n");
-        login_yes = 0;
+        return LOGIN_FAILED;
     }
     recvbytes = recv(control_sockfd, recvline, sizeof(recvline), 0);
     if (recvbytes == -1) {
         printf("rest recv date is error.\n");
-        login_yes = 0;
+        return LOGIN_FAILED;
     }
     if (strncmp(recvline, "350 Restart position accepted (0).", 34) == 0) {
         npsupport = 1;
         printf("support 断点续传\n");
-        login_yes = 1;
     } else {
         npsupport = 0;
         printf("not support 断点续传\n");
-        login_yes = 0;
+        return LOGIN_FAILED;
     }
-//获取服务器版本信息
+
+    //获取服务器版本信息
     bzero(recvline, BUFFERSIZE);
     bzero(sendline, BUFFERSIZE);
     sprintf(sendline, "SYST\r\n");
@@ -203,23 +223,22 @@ int login() {
     sendbytes = send(control_sockfd, sendline, strlen(sendline), 0);
     if (sendbytes == -1) {
         printf("syst send is error\n");
-        login_yes = 0;
+        return LOGIN_FAILED;
     }
     recvbytes = recv(control_sockfd, recvline, sizeof(recvline), 0);
     if (recvbytes == -1) {
         printf("syst recv is error\n");
-        login_yes = 0;
+        return LOGIN_FAILED;
     }
     if (strncmp(recvline, "215 UNIX Type: L8", 17) == 0) {
         printf("%s", recvline);
-        login_yes = 1;
     } else {
         printf("syst recv connectin is error\n");
-        login_yes = 0;
+        return LOGIN_FAILED;
     }
 
 
-    return login_yes;
+    return control_sockfd;
 
 }
 
@@ -343,7 +362,7 @@ int ftp_up(int control_sockfd) {
     sprintf(sendline, "TYPE I\r\n");
     sendbytes = send(control_sockfd, sendline, strlen(sendline), 0);
     if (sendbytes < 0) {
-        printf(" type send is error!\n");
+        printf("type send is error!\n");
     }
     recvbytes = recv(control_sockfd, recvline, sizeof(recvline), 0);
     printf("%s\n", recvline);

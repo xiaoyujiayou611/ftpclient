@@ -1,23 +1,31 @@
-#ifndef _FTPCLIENT_
-#define _FTPCLIENT_ "ftpclient.h"
+#ifndef __FTPCLIENT_H__
+#define __FTPCLIENT_H__ "ftpclient.h"
 
-int login();
+typedef int ftpFd;
 
-void ftp_list(int control_sockfd);
+ftpFd login(char *server, int port, char * user, char * pwd);
 
-void ftp_pwd(int control_sockfd);
+void logout(ftpFd fd);
 
-void ftp_changdir(char dir[], int control_sockfd);
+int speed_test(int bytes);
 
-void ftp_quit(int control_sockfd);
+int speed_test_by_file(char * filename);
 
-void ftp_creat_mkd(char *path, int control_sockfd);
+void ftp_list(ftpFd fd);
 
-int ftp_up(int control_sockfd);
+void ftp_pwd(ftpFd fd);
 
-void ftp_stru(int control_sockfd);
+void ftp_changdir(char dir[], ftpFd fd);
 
-void ftp_rest(int control_sockfd);
+void ftp_quit(ftpFd fd);
+
+void ftp_creat_mkd(char *path, ftpFd fd);
+
+int ftp_up(ftpFd fd);
+
+void ftp_stru(ftpFd fd);
+
+void ftp_rest(ftpFd fd);
 
 char *itoa(int value, char *string, int radix);
 
