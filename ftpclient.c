@@ -12,10 +12,12 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <time.h>
+#include <sys/time.h>
 
 #include "ftpclient.h"
 
+#define PBSTR "--------------------------------------------------"
+#define PBWIDTH 50
 #define SERV_PORT   21
 #define BUFFERSIZE  1024
 int login_yes = 0;
@@ -23,12 +25,153 @@ int npsupport;
 int f;
 
 #define LOGIN_FAILED    -1
-#define FTP_USER        "ftpuser"
-#define FTP_PASS        "admin"
 
 
 void error(char *p) {
     printf("Error: %s\n", p);
+}
+
+void printProgress (double percentage)
+{
+    int val = (int) (percentage * 100);
+    if (val > 100) {
+        val = 100;
+    }
+    int lpad = (int) (percentage * PBWIDTH);
+    int rpad = PBWIDTH - lpad;
+    printf ("\r%3d%% [%.*s%*s]", val, lpad, PBSTR, rpad, "");
+    fflush (stdout);
+}
+
+
+double milliseconds() {
+    struct timeval  tv;
+    gettimeofday(&tv, NULL);
+    return (tv.tv_sec) * 1000 + (tv.tv_usec) / 1000 ; // convert tv_sec & tv_usec to millisecond
+}
+
+
+int getport(char * str) {
+    int i, j;
+    char *ptr1, *ptr2;
+    char num[BUFFERSIZE];
+    bzero(num, BUFFERSIZE);
+    //取低位字节
+    ptr1 = str + strlen(str);
+    while (*(ptr1) != '|') {
+        ptr1--;
+    }
+    ptr2 = ptr1 - 1;
+    while (*(ptr2) != '|')
+        ptr2--;
+
+    strncpy(num, ptr2 + 1, ptr1 - ptr2 - 1);
+    return atoi(num);
+    //取高位字节
+    // bzero(num, BUFFERSIZE);
+    // ptr1 = ptr2;
+    // ptr2--;
+    // while (*(ptr2) != ',')
+    //     ptr2--;
+    // strncpy(num, ptr2 + 1, ptr1 - ptr2 - 1);
+    // j = atoi(num);
+    // return j * 256 + i;
+}
+
+
+void sendcmd(ftpFd fd, char * cmd, char * code, char * ret) {
+    char sendline[BUFFERSIZE], recvline[BUFFERSIZE];
+    bzero(sendline, BUFFERSIZE);
+    bzero(recvline, BUFFERSIZE);
+
+    snprintf(sendline, BUFFERSIZE, "%s\r\n", cmd);
+    printf(">>>%s\n", cmd);
+    if (send(fd, sendline, strlen(sendline), 0) < 0) {
+        printf("Send cmd %s error\n", cmd);
+        exit(1);
+    }
+    if (recv(fd, recvline, sizeof(recvline), 0) < 0) {
+        printf("Recv cmd %s error\n", cmd);
+        exit(1);
+    }
+    if (strncmp(recvline, code, 3) == 0) {
+        printf("%s\n", recvline);
+        strncpy(ret, recvline, sizeof(recvline));
+    } else {
+        printf("Exec cmd %s error: %s\n", cmd, recvline);
+        exit(1);
+    }
+}
+
+
+double speed(ftpFd control_sockfd, char * addr, int seconds) {
+    char sendline[BUFFERSIZE], recvline[BUFFERSIZE];
+    int dataport;
+    ftpFd data_sockfd;
+    bzero(sendline, BUFFERSIZE);
+    bzero(recvline, BUFFERSIZE);
+
+    // binary mode
+    sendcmd(control_sockfd, "TYPE I", "200", recvline);
+    
+
+    //PASV mode
+    sendcmd(control_sockfd, "EPSV", "229", recvline);
+
+    dataport = getport(recvline);
+
+    data_sockfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    struct sockaddr_in data_sock;
+    data_sock.sin_family = AF_INET;
+
+    bzero(&data_sock, sizeof(data_sock));
+    //获取hostent中相关参数
+    if (inet_pton(AF_INET, addr, &data_sock.sin_addr) == 0) {
+        printf("Server IP is a error!\n");
+        exit(1);
+    }
+
+    data_sock.sin_port = htons(dataport);
+    int ret = connect(data_sockfd, (struct sockaddr *) &data_sock, sizeof(struct sockaddr));
+    if ( ret == -1) {
+        printf("Connect to data socket error: %s:%d, ret: %d, error: %s\n", addr, dataport, ret, strerror(errno));
+        exit(1);
+    }
+
+    sendcmd(control_sockfd, "STOR SPEEDTEST", "150", recvline);
+
+    double start = milliseconds(), costed = 0;
+    int chunksize = 1024, count = 0;
+
+    while ((int)costed < seconds * 1000)//start to transport the file!
+    {
+        char buffer[chunksize];
+        bzero(buffer, sizeof(buffer));
+        send(data_sockfd, buffer, chunksize, 0);
+        count += 1;
+        costed = milliseconds() - start;
+        //printf("Process: %f\n", (double)costed / (double)seconds / 1000);
+        printProgress(costed / (double)seconds / 1000);
+    }
+
+    printf("\nbytes: %d, seconds: %d\n", count * chunksize, (int)costed / 1000);
+    close(data_sockfd);
+
+    return (double)count * (double)chunksize / (double)costed * 1000;
+}
+
+
+double speed_test(char * host, int port, char * username, char * password, int seconds) {
+    ftpFd fd = login(host, port, username, password);
+    if (fd > 0) {
+        double s = speed(fd, host, seconds); //50M
+        logout(fd);
+        return s;
+    } else {
+        /* code */
+    }
+    return -1;
 }
 
 
@@ -99,14 +242,6 @@ int cli(int argc, char **argv) {
 
 }
 
-int speed_test(int bytes) {
-    return 0;
-}
-
-int speed_test_by_file(char * filename) {
-    return 0;
-}
-
 void logout(ftpFd fd) {
     close(fd);
 }
@@ -150,96 +285,31 @@ ftpFd login(char * server, int port, char * user, char * pwd) {
         printf("220 connect is error!");
         return LOGIN_FAILED;
     }
+    
     //ftp用户登录主体部分
     int sendbytes, recvbytes;
-    bzero(name, BUFFERSIZE);
-    bzero(password, BUFFERSIZE);
     bzero(recvline, BUFFERSIZE);
     bzero(sendline, BUFFERSIZE);
 
-    //拼接登录命令
-    int n = snprintf(sendline, sizeof(sendline), "USER %s\r\n", user);
-    if (n >= sizeof(sendline)) {
-        printf("Memory error!\n");
-        exit(1);
-    }
-    printf(">>>%s\n", sendline);
-    sendbytes = send(control_sockfd, sendline, strlen(sendline), 0);
-    if (sendbytes == -1) {
-        printf("send is wrong\n");
-        return LOGIN_FAILED;
-    }
-    recvbytes = recv(control_sockfd, recvline, sizeof(recvline), 0);
-    if (strncmp(recvline, "331", 3) == 0) {
-        printf("331 please specify the password.\n");
-    } else {
-        printf("recv date is error.\n");
-        return LOGIN_FAILED;
-    }
+    //发送登录命令
+    snprintf(sendline, sizeof(sendline), "USER %s", user);
+    sendcmd(control_sockfd, sendline, "331", recvline);
+
+    //发送密码
     bzero(sendline, BUFFERSIZE);
     bzero(recvline, BUFFERSIZE);
-    snprintf(sendline, sizeof(sendline), "PASS %s\r\n", pwd);
-    printf(">>>%s\n", sendline);
-    sendbytes = send(control_sockfd, sendline, strlen(sendline), 0);
-    if (sendbytes == -1) {
-        printf("pass send is error\n");
-        return LOGIN_FAILED;
-    }
-    recvbytes = recv(control_sockfd, recvline, sizeof(recvline), 0);
-    if (strncmp(recvline, "230", 3) == 0) {
-        printf("login success!\n");
-    } else {
-        printf("pass recv is error\n");
-        return LOGIN_FAILED;
-    }    //支持断点续传
-    bzero(sendline, BUFFERSIZE);
+    snprintf(sendline, sizeof(sendline), "PASS %s", pwd);
+    sendcmd(control_sockfd, sendline, "230", recvline);
+
+    //是否支持断点续传
     bzero(recvline, BUFFERSIZE);
-    sprintf(sendline, "REST %s\r\n", "0");
-    sendbytes = send(control_sockfd, sendline, strlen(sendline), 0);
-    if (sendbytes == -1) {
-        printf("rest send is error!\n");
-        return LOGIN_FAILED;
-    }
-    recvbytes = recv(control_sockfd, recvline, sizeof(recvline), 0);
-    if (recvbytes == -1) {
-        printf("rest recv date is error.\n");
-        return LOGIN_FAILED;
-    }
-    if (strncmp(recvline, "350 Restart position accepted (0).", 34) == 0) {
-        npsupport = 1;
-        printf("support 断点续传\n");
-    } else {
-        npsupport = 0;
-        printf("not support 断点续传\n");
-        return LOGIN_FAILED;
-    }
+    sendcmd(control_sockfd, "REST 0", "350", recvline);
 
     //获取服务器版本信息
     bzero(recvline, BUFFERSIZE);
-    bzero(sendline, BUFFERSIZE);
-    sprintf(sendline, "SYST\r\n");
-
-    //  printf("--->%s\n",sendline);
-    sendbytes = send(control_sockfd, sendline, strlen(sendline), 0);
-    if (sendbytes == -1) {
-        printf("syst send is error\n");
-        return LOGIN_FAILED;
-    }
-    recvbytes = recv(control_sockfd, recvline, sizeof(recvline), 0);
-    if (recvbytes == -1) {
-        printf("syst recv is error\n");
-        return LOGIN_FAILED;
-    }
-    if (strncmp(recvline, "215 UNIX Type: L8", 17) == 0) {
-        printf("%s", recvline);
-    } else {
-        printf("syst recv connectin is error\n");
-        return LOGIN_FAILED;
-    }
-
+    sendcmd(control_sockfd, "SYST", "215", recvline);
 
     return control_sockfd;
-
 }
 
 void ftp_quit(int control_sockfd) {

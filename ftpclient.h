@@ -7,9 +7,7 @@ ftpFd login(char *server, int port, char * user, char * pwd);
 
 void logout(ftpFd fd);
 
-int speed_test(int bytes);
-
-int speed_test_by_file(char * filename);
+double speed_test(char * host, int port, char * username, char * password, int seconds);
 
 void ftp_list(ftpFd fd);
 
