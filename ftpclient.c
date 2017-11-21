@@ -123,9 +123,9 @@ double speed(ftpFd control_sockfd, char * addr, int seconds) {
     data_sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     struct sockaddr_in data_sock;
+    bzero(&data_sock, sizeof(data_sock));
     data_sock.sin_family = AF_INET;
 
-    bzero(&data_sock, sizeof(data_sock));
     //获取hostent中相关参数
     if (inet_pton(AF_INET, addr, &data_sock.sin_addr) == 0) {
         printf("Server IP is a error!\n");
