@@ -104,9 +104,10 @@ void sendcmd(ftpFd fd, char * cmd, char * code, char * ret) {
 }
 
 
-double speed(ftpFd control_sockfd, char * addr, int seconds) {
+struct Speed speed(ftpFd control_sockfd, char * addr, int seconds) {
     char sendline[BUFFERSIZE], recvline[BUFFERSIZE];
-    int dataport;
+    int dataport, size;
+    struct Speed speed;
     ftpFd data_sockfd;
     bzero(sendline, BUFFERSIZE);
     bzero(recvline, BUFFERSIZE);
@@ -123,9 +124,9 @@ double speed(ftpFd control_sockfd, char * addr, int seconds) {
     data_sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     struct sockaddr_in data_sock;
+    bzero(&data_sock, sizeof(data_sock));
     data_sock.sin_family = AF_INET;
 
-    bzero(&data_sock, sizeof(data_sock));
     //获取hostent中相关参数
     if (inet_pton(AF_INET, addr, &data_sock.sin_addr) == 0) {
         printf("Server IP is a error!\n");
@@ -139,6 +140,7 @@ double speed(ftpFd control_sockfd, char * addr, int seconds) {
         exit(1);
     }
 
+    // upload speed
     sendcmd(control_sockfd, "STOR SPEEDTEST", "150", recvline);
 
     double start = milliseconds(), costed = 0;
@@ -155,23 +157,75 @@ double speed(ftpFd control_sockfd, char * addr, int seconds) {
         printProgress(costed / (double)seconds / 1000);
     }
 
-    printf("\nbytes: %d, seconds: %d\n", count * chunksize, (int)costed / 1000);
+
+    close(data_sockfd);
+    sendcmd(control_sockfd, "", "226", recvline);
+
+    printf("\nbytes: %d, seconds: %d\n\n", count * chunksize, (int)costed / 1000);
+    speed.upload = (double)count * (double)chunksize / (double)costed * 1000;
+
+    sendcmd(control_sockfd, "SIZE SPEEDTEST", "213", recvline);
+    size = atoi(&recvline[4]);
+    printf("Total transfer size: %d byte\n", size);
+
+    // download speed
+    // reopen data socket
+    //PASV mode
+    sendcmd(control_sockfd, "EPSV", "229", recvline);
+
+    dataport = getport(recvline);
+
+    data_sockfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    data_sock.sin_family = AF_INET;
+
+    bzero(&data_sock, sizeof(data_sock));
+    //获取hostent中相关参数
+    if (inet_pton(AF_INET, addr, &data_sock.sin_addr) == 0) {
+        printf("Server IP is a error!\n");
+        exit(1);
+    }
+
+    data_sock.sin_port = htons(dataport);
+    ret = connect(data_sockfd, (struct sockaddr *) &data_sock, sizeof(struct sockaddr));
+    if ( ret == -1) {
+        printf("Connect to data socket error: %s:%d, ret: %d, error: %s\n", addr, dataport, ret, strerror(errno));
+        exit(1);
+    }
+
+    sendcmd(control_sockfd, "RETR SPEEDTEST", "150", recvline);
+
+    start = milliseconds(), costed = 0;
+    count = 0, chunksize = 0;
+
+    while ((chunksize = recv(data_sockfd, recvline, sizeof(recvline), 0)) > 0)//start to transport the file!
+    {
+        count += chunksize;
+        costed = milliseconds() - start;
+        //printf("Process: %f\n", (double)costed / (double)seconds / 1000);
+        printProgress(count / (double)size);
+    }
+
+    printf("\nbytes: %d, seconds: %d\n\n", count, (int)costed / 1000);
+    speed.download = (double)count / (double)costed * 1000;
+
     close(data_sockfd);
 
-    return (double)count * (double)chunksize / (double)costed * 1000;
+    return speed;
 }
 
 
-double speed_test(char * host, int port, char * username, char * password, int seconds) {
+struct Speed speed_test(char * host, int port, char * username, char * password, int seconds) {
     ftpFd fd = login(host, port, username, password);
+    struct Speed result;
     if (fd > 0) {
-        double s = speed(fd, host, seconds); //50M
+        result = speed(fd, host, seconds); //50M
         logout(fd);
-        return s;
+        return result;
     } else {
         /* code */
     }
-    return -1;
+    return result;
 }
 
 

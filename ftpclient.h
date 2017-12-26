@@ -3,11 +3,16 @@
 
 typedef int ftpFd;
 
+struct Speed {
+    double upload;
+    double download;
+};
+
 ftpFd login(char *server, int port, char * user, char * pwd);
 
 void logout(ftpFd fd);
 
-double speed_test(char * host, int port, char * username, char * password, int seconds);
+struct Speed speed_test(char * host, int port, char * username, char * password, int seconds);
 
 void ftp_list(ftpFd fd);
 
